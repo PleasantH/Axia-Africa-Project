@@ -4,6 +4,9 @@ import { userRoutes } from './routers/userRouters';
 import connectDB from './dbconnect/mongodb';
 import { authRoutes } from './routers/authRouters';
 import productRouter from './routers/productRouters';
+import orderRouter from './routers/orderRouters';
+
+
 // Load environment variables
 dotenv.config();
 connectDB(); // Connect to MongoDB
@@ -17,6 +20,7 @@ app.use(express.json());
 app.use('/users', userRoutes);
 app.use('/', authRoutes);
 app.use('/products', productRouter)
+app.use('/orders', orderRouter);
 
 
 // Port configuration

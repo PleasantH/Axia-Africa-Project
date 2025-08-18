@@ -18,7 +18,7 @@ export const createUser = async (req: CreateUserRequest, res: Response): Promise
         const { userName, email, password, userType, address } = req.body;
 
         // Check if all fields are provided
-        if (!userName || !email || !password || !userType || !address) {
+        if (!userName || !email || !password || !userType) {
             return res.status(400).json({ 
                 message: 'Please fill all fields' 
             });

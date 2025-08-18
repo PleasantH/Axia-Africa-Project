@@ -1,5 +1,7 @@
 import { Request, Response } from "express";
+import jwt, { JwtPayload } from "jsonwebtoken";
 import { Product } from "../schema/productSchema";
+import { User } from "../schema/User";
 
 // Define Product creation request body interface
 interface CreateProductBody {
@@ -9,35 +11,75 @@ interface CreateProductBody {
   quantity: number;
 }
 
-const createProduct = async (req: Request<{}, {}, CreateProductBody>, res: Response) => {
+// Extend Request type to include userId
+interface AuthRequest extends Request {
+  userId?: string;
+}
+
+// 🔹 Utility to extract and validate JWT, returning user object
+const authenticateAdmin = async (req: AuthRequest, res: Response): Promise<any | null> => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    res.status(401).json({ message: "No token provided" });
+    return null;
+  }
+
+  const token = authHeader.split(" ")[1];
+  let decoded: JwtPayload;
   try {
+    decoded = jwt.verify(token, process.env.JWT_SECRET as string) as JwtPayload;
+  } catch (err) {
+    res.status(401).json({ message: "Invalid or expired token" });
+    return null;
+  }
+
+  const userId = decoded.id || decoded.userId;
+  if (!userId) {
+    res.status(401).json({ message: "Unauthorized" });
+    return null;
+  }
+
+  const user = await User.findById(userId);
+  if (!user) {
+    res.status(404).json({ message: "User not found" });
+    return null;
+  }
+
+  if (user.userType !== "admin") {
+    res.status(403).json({ message: "Access denied. Only admins can perform this action." });
+    return null;
+  }
+
+  req.userId = userId;
+  return user;
+};
+
+// 🔹 Create Product (Admin only)
+const createProduct = async (req: AuthRequest, res: Response) => {
+  try {
+    const user = await authenticateAdmin(req, res);
+    if (!user) return; // stop execution if not admin
+
     const { name, price, category, quantity } = req.body;
 
     if (!name || !price || !category || !quantity) {
       return res.status(400).json({ message: "Please fill all fields" });
     }
 
-    // If you want to check duplicates by name instead of ID:
     const existingProduct = await Product.findOne({ name });
-
     if (existingProduct) {
       return res.status(400).json({ message: "Product already exists" });
     }
-
-    console.log("Creating product with name:", name);
 
     const newProduct = new Product({
       name,
       price,
       category,
       quantity,
+      createdBy: req.userId,
     });
 
-    console.log("New product created:", newProduct);
-
     const savedProduct = await newProduct.save();
-
-    console.log("Product saved successfully:", savedProduct);
 
     return res.status(201).json({
       message: "Product created successfully",
@@ -51,7 +93,7 @@ const createProduct = async (req: Request<{}, {}, CreateProductBody>, res: Respo
   }
 };
 
-// Get all products
+// 🔹 Get all products
 const getAllProducts = async (req: Request, res: Response) => {
   try {
     const products = await Product.find();
@@ -67,10 +109,10 @@ const getAllProducts = async (req: Request, res: Response) => {
   }
 };
 
-// Get products by category
+// 🔹 Get products by category
 const getAProductByCategory = async (req: Request, res: Response) => {
   try {
-    const { category } = req.params; // from route: /category/:category
+    const { category } = req.params;
 
     if (!category) {
       return res.status(400).json({ message: "Category is required" });
@@ -94,11 +136,10 @@ const getAProductByCategory = async (req: Request, res: Response) => {
   }
 };
 
-
-//Get a product by ID
+// 🔹 Get product by ID
 const getProductById = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params; // from route: /product/:id
+    const { id } = req.params;
 
     if (!id) {
       return res.status(400).json({ message: "Product ID is required" });
@@ -122,11 +163,48 @@ const getProductById = async (req: Request, res: Response) => {
   }
 };
 
-
-// Delete a product by ID
-const deleteAProduct = async (req: Request, res: Response) => {
+// 🔹 Update a product (Admin only)
+const updateProduct = async (req: AuthRequest, res: Response) => {
   try {
-    const { id } = req.params; // from route: /delete/:id
+    const user = await authenticateAdmin(req, res);
+    if (!user) return;
+
+    const { id } = req.params;
+    const { name, price, category, quantity } = req.body;
+
+    if (!id) {
+      return res.status(400).json({ message: "Product ID is required" });
+    }
+
+    const updatedProduct = await Product.findByIdAndUpdate(
+      id,
+      { name, price, category, quantity },
+      { new: true }
+    );
+
+    if (!updatedProduct) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    return res.status(200).json({
+      message: "Product updated successfully",
+      product: updatedProduct,
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+// 🔹 Delete a product (Admin only)
+const deleteAProduct = async (req: AuthRequest, res: Response) => {
+  try {
+    const user = await authenticateAdmin(req, res);
+    if (!user) return;
+
+    const { id } = req.params;
 
     if (!id) {
       return res.status(400).json({ message: "Product ID is required" });
@@ -150,5 +228,11 @@ const deleteAProduct = async (req: Request, res: Response) => {
   }
 };
 
-
-export { createProduct, getAllProducts, getAProductByCategory, getProductById, deleteAProduct };
+export {
+  createProduct,
+  getAllProducts,
+  getAProductByCategory,
+  getProductById,
+  updateProduct,
+  deleteAProduct,
+};
